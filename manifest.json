@@ -1,10 +1,13 @@
 {
-  "id": "com.author.modname",
-  "name": "My Mod",
-  "description": "Description of your mod",
-  "version": "1.0.0",
+  "id": "net.mfranchi.neighborhood-station-names",
+  "name": "Neighborhood Station Names",
+  "description": "Names stations after the nearest neighborhood label instead of nearby roads. Toggle in Settings.",
+  "version": "0.1.0",
   "author": {
-    "name": "Your Name"
+    "name": "Matt Franchi",
+    "url": "https://mfranchi.net"
   },
+  "icon": "neighborhood-station-names-mod.png",
+  "minGameVersion": "1.1.0",
   "main": "index.js"
 }

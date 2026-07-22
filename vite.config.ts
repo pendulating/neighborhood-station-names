@@ -36,6 +36,10 @@ export default defineConfig({
           src: 'manifest.json',
           dest: '.',
         },
+        {
+          src: 'neighborhood-station-names-mod.png',
+          dest: '.',
+        },
       ],
     }),
   ],

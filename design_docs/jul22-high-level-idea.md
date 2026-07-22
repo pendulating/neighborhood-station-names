@@ -1,0 +1,3 @@
+When stations are placed in blueprint mode in Subway Builder, the automatically-selected name for them is determined by nearby road names. However, some cities, and some users, may prefer a configuration where station names are determined by nearby neighbohood labels, which are exposed and included in (all, I think) default maps and most high-quality modded maps. 
+
+So, this mod's MVP capability is a switch/toggle (in the Settings menu/ Mod settings menu) that switches from road-based station naming to neighborhood-based station naming.

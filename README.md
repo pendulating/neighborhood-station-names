@@ -1,139 +1,47 @@
-# Subway Builder Mod Template
+# Neighborhood Station Names
 
-> [!IMPORTANT]
-> This template targets **Modding API v1.0.0**. Types may not match older or newer game versions.
+*A mod for Subway Builder that names stations after their neighborhoods, rather than the nearest road.*
 
-TypeScript + React template for Subway Builder mods using rolldown-vite. **Please use pnpm!**
 
-## Setup
+## What it does
+
+Specifically, the mod introduces three behaviors: a toggle, "Name stations by neighborhood," which switches neighborhood-based naming on or off (on by default); a button, "Rename existing stations by neighborhood," which re-applies neighborhood names to every station already on the map; and automatic naming, which labels each new station as we place it in blueprint mode or construct it, whenever the toggle is on.
+
+## UX
+
+The mod does not fight a manual rename: once a name is changed by hand, the mod leaves it alone. It also degrades gracefully where labels are sparse: it tries neighborhood labels first, then suburb labels, then city labels (searching within roughly 4,000 meters, about 2.5 miles, of each station), and finally it just leaves the road-based name in place.
+
+## Requirements
+
+The mod requires the following:
+
+- Subway Builder v1.1.0 or newer.
+- A map that includes neighborhood labels, which is true of the default maps and most high-quality modded maps.
+
+## Installation
+
+Install with Railyard, then enable the mod in-game under Settings -> Mods.
+
+## Usage
+
+1. Open Settings and confirm that "Name stations by neighborhood" is on.
+2. Place stations as usual; each new station takes the name of its nearest neighborhood.
+3. To rename stations that already exist (e.g., after turning the toggle on for the first time), click "Rename existing stations by neighborhood."
+
+The toggle persists between sessions on a best-effort basis. The game's own mod-storage facility is currently in-flux, so the mod stores this single setting in `localStorage` instead; this is a documented workaround and may, in rare cases, reset.
+
+## Building from source
+Contributions are welcome and please report issues! To build the mod yourself, use pnpm:
 
 ```bash
-pnpm install
+pnpm install      # install dependencies
+pnpm build        # write the mod to dist/
+pnpm test         # run the automated test suite
 ```
 
-## Scripts
+The repository ships with an automated test suite and continuous-integration checks; on every push, it runs the type checker, the tests (with enforced coverage thresholds), and a build.
 
-| Command           | Description                           |
-| ----------------- | ------------------------------------- |
-| `pnpm build`      | Build the mod to `dist/`              |
-| `pnpm dev`        | Watch mode + launch game with logging |
-| `pnpm dev:link`   | Symlink `dist/` to game's mods folder |
-| `pnpm dev:unlink` | Remove the symlink                    |
-| `pnpm typecheck`  | Run TypeScript type checking          |
 
-## Development Workflow
+## License
 
-1. Build and link your mod:
-
-   ```bash
-   pnpm build
-   pnpm dev:link
-   ```
-
-2. Enable the mod in Subway Builder: Settings > Mods
-
-3. Start development with hot reload:
-
-   ```bash
-   pnpm dev
-   ```
-
-   This runs the vite watcher and game simultaneously. Logs are saved to `debug/latest.log`.
-
-4. After making changes, reload mods in-game or restart. You can use CTRL + SHIFT + R or CMD + SHIFT + R to hot reload in-game.
-
-## Project Structure
-
-```
-├── src/
-│   ├── main.ts              # Entry point
-│   ├── ui/
-│   │   └── ExamplePanel.tsx # Example React component
-│   └── types/
-│       ├── react.ts         # React shim (pulls from game API)
-│       ├── index.d.ts       # Re-exports + global Window
-│       ├── api.d.ts         # Main ModdingAPI interface
-│       ├── core.d.ts        # Coordinate, BoundingBox, etc.
-│       ├── game-state.d.ts  # Station, Track, Train, Route
-│       ├── build.d.ts       # Build automation
-│       ├── ui.d.ts          # UI placements & options
-│       └── ...              # + 13 more type modules
-├── scripts/
-│   ├── run.ts               # Game launcher with logging
-│   └── link.ts              # Symlink management
-├── manifest.json            # Mod metadata
-├── vite.config.ts           # Build config
-└── tsconfig.json
-```
-
-## Configuration
-
-Edit `manifest.json` to set your mod's ID, name, and description:
-
-```json
-{
-  "id": "com.yourname.yourmod",
-  "name": "Your Mod Name",
-  "description": "What it does",
-  "version": "1.0.0",
-  "author": { "name": "Your Name" },
-  "main": "index.js"
-}
-```
-
-## Using React
-
-React is provided by the game at runtime. Import hooks normally:
-
-```tsx
-import { useState, useEffect } from "react";
-```
-
-For game UI components, pull them from the API:
-
-```tsx
-const { Button, Card } = window.SubwayBuilderAPI.utils.components as Record<
-  string,
-  React.ComponentType<any>
->;
-```
-
-## Game API
-
-Access the full API via `window.SubwayBuilderAPI`:
-
-```ts
-const api = window.SubwayBuilderAPI;
-
-// Hooks
-api.hooks.onMapReady((map) => { ... });
-api.hooks.onDayChange((day) => { ... });
-
-// UI - Floating panels (icon names from Lucide)
-api.ui.addFloatingPanel({
-  id: 'my-panel',
-  title: 'My Panel',
-  icon: 'Settings',
-  render: MyComponent,
-});
-
-// UI - Buttons and notifications
-api.ui.addButton('escape-menu', { id: 'btn', label: 'Click', onClick: () => {} });
-api.ui.showNotification('Hello', 'info');
-
-// Game state
-api.gameState.getStations();
-api.gameState.getBudget();
-
-// Actions
-api.actions.setMoney(1000000);
-api.actions.setPause(true);
-```
-
-See `src/types/` for the full API type reference, or the [official docs](https://www.subwaybuilder.com/docs/v1.0.0).
-
-## Mods Folder Location
-
-- **macOS**: `~/Library/Application Support/metro-maker4/mods/`
-- **Windows**: `%APPDATA%\metro-maker4\mods\`
-- **Linux**: `~/.config/metro-maker4/mods/`
+This mod is released under the MIT License.
