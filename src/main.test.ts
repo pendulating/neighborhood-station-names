@@ -77,9 +77,9 @@ describe('main wiring', () => {
     fireMapReady(mock.handlers);
 
     expect(mock.toggles).toHaveLength(1);
-    expect(mock.toggles[0].id).toBe('net.mfranchi.neighborhood-station-names.enabled');
+    expect(mock.toggles[0].id).toBe('neighborhood-station-names.enabled');
     expect(mock.buttons).toHaveLength(1);
-    expect(mock.buttons[0].id).toBe('net.mfranchi.neighborhood-station-names.rename-existing');
+    expect(mock.buttons[0].id).toBe('neighborhood-station-names.rename-existing');
     expect(mock.handlers.blueprintPlaced).toHaveLength(1);
     expect(mock.handlers.stationBuilt).toHaveLength(1);
   });

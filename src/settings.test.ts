@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const STORAGE_KEY = 'net.mfranchi.neighborhood-station-names:enabled';
+const STORAGE_KEY = 'neighborhood-station-names:enabled';
 
 const realLocalStorage = globalThis.localStorage;
 

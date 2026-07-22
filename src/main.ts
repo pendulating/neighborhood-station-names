@@ -14,7 +14,7 @@
 import { isEnabled, setEnabled } from './settings';
 import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
 
-const MOD_ID = 'net.mfranchi.neighborhood-station-names';
+const MOD_ID = 'neighborhood-station-names';
 const MOD_VERSION = '0.1.0';
 const TAG = '[NeighborhoodNames]';
 

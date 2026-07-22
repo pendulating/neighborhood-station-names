@@ -5,7 +5,7 @@
  * so we persist the single toggle in `localStorage` (documented workaround).
  */
 
-const STORAGE_KEY = 'net.mfranchi.neighborhood-station-names:enabled';
+const STORAGE_KEY = 'neighborhood-station-names:enabled';
 
 let enabled = loadEnabled();
 
