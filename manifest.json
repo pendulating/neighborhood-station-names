@@ -1,5 +1,5 @@
 {
-  "id": "net.mfranchi.neighborhood-station-names",
+  "id": "neighborhood-station-names",
   "name": "Neighborhood Station Names",
   "description": "Names stations after the nearest neighborhood label instead of nearby roads. Toggle in Settings.",
   "version": "0.2.0",
