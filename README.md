@@ -15,7 +15,7 @@ The mod does not fight a manual rename: once a name is changed by hand, the mod 
 
 The mod requires the following:
 
-- Subway Builder v1.1.0 or newer.
+- Subway Builder v1.3.0 or newer.
 - A map that includes neighborhood labels, which is true of the default maps and most high-quality modded maps.
 
 ## Installation
