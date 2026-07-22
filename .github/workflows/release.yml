@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      - name: Package mod
+        run: |
+          mkdir -p package/neighborhood-station-names
+          cp -r dist/. package/neighborhood-station-names/
+          cd package
+          zip -r "../neighborhood-station-names-${GITHUB_REF_NAME}.zip" neighborhood-station-names
+
+      - name: Upload zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: neighborhood-station-names-${{ github.ref_name }}.zip
