@@ -39,7 +39,9 @@ jobs:
           cd package
           zip -r "../neighborhood-station-names-${GITHUB_REF_NAME}.zip" neighborhood-station-names
 
-      - name: Upload zip to release
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: neighborhood-station-names-${{ github.ref_name }}.zip
+          files: |
+            neighborhood-station-names-${{ github.ref_name }}.zip
+            dist/manifest.json
