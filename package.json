@@ -1,6 +1,6 @@
 {
   "name": "neighborhood-station-names",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Subway Builder mod: name stations after nearby neighborhoods instead of roads",
   "main": "dist/index.js",
   "type": "module",

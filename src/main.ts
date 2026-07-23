@@ -14,8 +14,11 @@
 import { isEnabled, setEnabled } from './settings';
 import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
 
+// Injected at build time from manifest.json (see vite.config.ts).
+declare const __MOD_VERSION__: string;
+
 const MOD_ID = 'neighborhood-station-names';
-const MOD_VERSION = '0.1.0';
+const MOD_VERSION = __MOD_VERSION__;
 const TAG = '[NeighborhoodNames]';
 
 const api = window.SubwayBuilderAPI;

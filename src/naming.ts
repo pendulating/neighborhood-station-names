@@ -1,11 +1,13 @@
 /**
- * Orchestrates neighborhood-based station naming: for a given station, look up
- * the nearest neighborhood label and apply it via the store.
+ * Orchestrates neighborhood-based station naming: scan the stations in the store
+ * and rename each to its nearest neighborhood/suburb label via the game's store.
+ * A neighborhood/suburb name is assigned to at most one station; a station that
+ * would duplicate a name already in use keeps its road-based name instead.
  */
 
 import type { ModdingAPI } from './types/api';
 import type { Station } from './types/game-state';
-import { getStore, setStationName } from './store';
+import { getStore, setStationName, refreshStationName } from './store';
 import { findNeighborhoodName, type MaplibreLike } from './neighborhoods';
 import { isEnabled } from './settings';
 
@@ -14,49 +16,63 @@ const TAG = '[NeighborhoodNames]';
 /** Stations we've already renamed, so we never fight a user's manual rename. */
 const processed = new Set<string>();
 
-/**
- * Rename a single station to its nearest neighborhood, if the toggle is on and a
- * neighborhood is found. Returns true only if the name was actually changed.
- */
-export function applyNeighborhoodName(api: ModdingAPI, station: Station): boolean {
-  if (!isEnabled()) return false;
-  if (!station || processed.has(station.id)) return false;
-
-  const map = api.utils.getMap() as unknown as MaplibreLike | null;
-  const name = findNeighborhoodName(map, station.coords);
-  if (!name) return false; // leave the existing road-based name; try again if seen later
-
-  // Avoid a redundant store write if the name already matches.
-  if (station.name === name) {
-    processed.add(station.id);
-    return false;
-  }
-
-  const ok = setStationName(station.id, name);
-  if (!ok) return false; // store not ready — don't mark processed, retry later
-
-  console.log(`${TAG} "${station.name}" -> "${name}" (${station.id})`);
-  processed.add(station.id);
-  return true;
+/** All stations, from the live store when available, else the API snapshot. */
+function getAllStations(api: ModdingAPI): Station[] {
+  const store = getStore();
+  return store?.stations ?? api.gameState.getStations() ?? [];
 }
 
 /**
- * Re-scan every station in the store and rename any not yet processed. Used on
- * blueprint placement / construction hooks (which don't hand us the station list
- * directly) and by the "rename existing stations" action.
+ * Re-scan every station and rename any not yet processed. Used on blueprint
+ * placement / construction hooks and by the "rename existing stations" action.
+ *
+ * A neighborhood/suburb name is handed out to at most one station: uniqueness is
+ * enforced globally rather than per line, because stations on a line still being
+ * built have no route yet and so can't be scoped by line. When a station would
+ * take a name another station already has, it keeps its road-based name (recomputed
+ * via refresh when it had already been assigned the duplicate). The player is free
+ * to rename stations by hand afterwards.
  *
  * @param force  when true, ignores the processed set (used by the manual button
- *               so the user can re-apply after toggling the setting on).
+ *               so the user can re-apply, and to undo pre-existing duplicates).
  */
 export function applyToAllStations(api: ModdingAPI, force = false): number {
-  const store = getStore();
-  const stations = store?.stations ?? api.gameState.getStations();
-  if (!stations || stations.length === 0) return 0;
+  if (!isEnabled()) return 0;
+  const stations = getAllStations(api);
+  if (stations.length === 0) return 0;
 
-  let renamed = 0;
+  // Neighborhood/suburb names already handed out. Seeded with the names of
+  // stations we will not rename (already processed) so a name assigned earlier is
+  // never given to a second station.
+  const usedNames = new Set<string>();
   for (const station of stations) {
     if (force) processed.delete(station.id);
-    if (applyNeighborhoodName(api, station)) renamed++;
+    else if (processed.has(station.id)) usedNames.add(station.name);
+  }
+
+  const map = api.utils.getMap() as unknown as MaplibreLike | null;
+  let renamed = 0;
+  for (const station of stations) {
+    if (processed.has(station.id)) continue;
+
+    const name = findNeighborhoodName(map, station.coords);
+    if (!name) continue; // no neighborhood; keep the road name
+    if (usedNames.has(name)) {
+      // Another station already has this name; fall back to the road-based name.
+      if (force && station.name === name) refreshStationName(station.id); // undo a prior duplicate
+      continue; // left unprocessed so it can take the name if it frees up later
+    }
+    if (station.name === name) {
+      processed.add(station.id);
+      usedNames.add(name); // already correct
+      continue;
+    }
+
+    if (!setStationName(station.id, name)) continue; // store not ready; retry later
+    console.log(`${TAG} "${station.name}" -> "${name}" (${station.id})`);
+    usedNames.add(name);
+    processed.add(station.id);
+    renamed++;
   }
   return renamed;
 }

@@ -1,6 +1,16 @@
 import { defineConfig } from 'vitest/config';
+import { readFileSync } from 'fs';
+import path from 'path';
+
+// Mirror vite.config.ts: inject the manifest version so main.ts resolves it in tests.
+const manifest = JSON.parse(readFileSync(path.resolve(__dirname, 'manifest.json'), 'utf-8')) as {
+  version: string;
+};
 
 export default defineConfig({
+  define: {
+    __MOD_VERSION__: JSON.stringify(manifest.version),
+  },
   test: {
     environment: 'happy-dom',
     setupFiles: ['./vitest.setup.ts'],

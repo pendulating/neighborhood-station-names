@@ -9,7 +9,7 @@ Specifically, the mod introduces three behaviors: a toggle, "Name stations by ne
 
 ## UX
 
-The mod does not fight a manual rename: once a name is changed by hand, the mod leaves it alone. To pick a name, it considers every nearby neighborhood and suburb label and uses the single nearest one, so a closer suburb wins over a more distant neighborhood. It looks within roughly 500 meters (about a third of a mile) of each station, and if nothing qualifies it just leaves the road-based name in place.
+The mod does not fight a manual rename: once a name is changed by hand, the mod leaves it alone. To pick a name, it considers every nearby neighborhood and suburb label and uses the single nearest one, so a closer suburb wins over a more distant neighborhood. It looks within roughly 500 meters (about a third of a mile) of each station, and if nothing qualifies it just leaves the road-based name in place. Each neighborhood or suburb name is given to at most one station: if several stations share the same nearest label, the first keeps it and the rest keep their road-based names, though you are free to rename them by hand.
 
 ## Requirements
 

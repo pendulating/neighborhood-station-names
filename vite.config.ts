@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
+import { readFileSync } from 'fs';
+
+// Read the manifest version at build time and inject it so the version the mod
+// logs never drifts from the published one.
+const manifest = JSON.parse(readFileSync(path.resolve(__dirname, 'manifest.json'), 'utf-8')) as {
+  version: string;
+};
 
 export default defineConfig({
+  define: {
+    __MOD_VERSION__: JSON.stringify(manifest.version),
+  },
   resolve: {
     alias: {
       'react/jsx-runtime': path.resolve(__dirname, 'src/types/react.ts'),

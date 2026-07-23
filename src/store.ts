@@ -34,3 +34,19 @@ export function setStationName(stationId: string, newName: string): boolean {
     return false;
   }
 }
+
+/**
+ * Recompute a station's default road-based name (what the in-game refresh button
+ * calls). Used to revert a station to its road name when keeping its neighborhood
+ * name would duplicate another station on the same line.
+ */
+export function refreshStationName(stationId: string): boolean {
+  const store = getStore();
+  if (!store) return false;
+  try {
+    store.updateStationName(stationId, { type: 'refresh' } satisfies UpdateStationNamePayload);
+    return true;
+  } catch {
+    return false;
+  }
+}

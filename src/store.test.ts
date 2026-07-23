@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getStore, setStationName } from './store';
+import { getStore, setStationName, refreshStationName } from './store';
 import type { StoreCallbacks } from './types/store';
 
 function installBridge(bridge: unknown): void {
@@ -69,5 +69,36 @@ describe('setStationName', () => {
       }),
     });
     expect(setStationName('s1', 'Greenpoint')).toBe(false);
+  });
+});
+
+describe('refreshStationName', () => {
+  beforeEach(() => {
+    delete (globalThis as Record<string, unknown>).__subwayBuilder_storeCallbacks__;
+  });
+
+  it('returns false when the store is unavailable', () => {
+    expect(refreshStationName('s1')).toBe(false);
+  });
+
+  it('dispatches a refresh payload identical to the in-game refresh button', () => {
+    const updateStationName = vi.fn();
+    installBridge({ getState: () => ({ stations: [], updateStationName }) });
+
+    expect(refreshStationName('s1')).toBe(true);
+    expect(updateStationName).toHaveBeenCalledTimes(1);
+    expect(updateStationName).toHaveBeenCalledWith('s1', { type: 'refresh' });
+  });
+
+  it('returns false (without throwing) when the store action throws', () => {
+    installBridge({
+      getState: () => ({
+        stations: [],
+        updateStationName: () => {
+          throw new Error('refresh failed');
+        },
+      }),
+    });
+    expect(refreshStationName('s1')).toBe(false);
   });
 });

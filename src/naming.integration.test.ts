@@ -111,6 +111,7 @@ describe('naming integration (real store bridge)', () => {
   });
 
   it('renames every new station in a batch after the clobber settles', () => {
+    vi.mocked(findNeighborhoodName).mockReturnValueOnce('Greenpoint').mockReturnValueOnce('Bushwick');
     const stations = [makeStation({ id: 's1' }), makeStation({ id: 's2', trackGroupId: 'g2', name: 'Other Rd' })];
     installGameStore(stations);
     const api = makeApi(stations);
@@ -120,6 +121,6 @@ describe('naming integration (real store bridge)', () => {
 
     vi.advanceTimersByTime(1);
     expect(stations[0].name).toBe('Greenpoint');
-    expect(stations[1].name).toBe('Greenpoint');
+    expect(stations[1].name).toBe('Bushwick');
   });
 });

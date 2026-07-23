@@ -24,9 +24,10 @@ const SOURCE_ID = 'general-tiles';
 const LABEL_SOURCE_LAYERS = ['neighborhood_labels', 'suburb_labels'] as const;
 
 /**
- * How far (in metres) a label may be from the station and still be used. Beyond
- * this we leave the game's road-based name in place. Deliberately tight: labels
- * sit at area centroids, and we only want genuinely local names.
+ * How far (in metres) a label may be from the station and still be used. A
+ * label sits at (or near) the centroid of its neighborhood/suburb, so a tight
+ * radius means we only assign a name when the station is near the centre of the
+ * area; beyond it we leave the game's road-based name in place.
  */
 const MAX_LABEL_DISTANCE_M = 500;
 
