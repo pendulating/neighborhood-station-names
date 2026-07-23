@@ -34,10 +34,8 @@ jobs:
 
       - name: Package mod
         run: |
-          mkdir -p package/neighborhood-station-names
-          cp -r dist/. package/neighborhood-station-names/
-          cd package
-          zip -r "../neighborhood-station-names-${GITHUB_REF_NAME}.zip" neighborhood-station-names
+          cd dist
+          zip -r "../neighborhood-station-names-${GITHUB_REF_NAME}.zip" .
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
