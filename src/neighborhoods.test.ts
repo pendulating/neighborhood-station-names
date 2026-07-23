@@ -4,11 +4,11 @@ import type { Coordinate } from './types/core';
 
 const HOME: Coordinate = [-74.0, 40.7];
 
-// ~1113m per 0.01deg latitude at this location; chosen with wide margins around
-// the 4000m cutoff so tests are not sensitive to haversine rounding.
-const NEAR = 0.01; // ~1.1km  -> inside cutoff
-const MID = 0.02; //  ~2.2km  -> inside cutoff
-const FAR = 0.05; //  ~5.6km  -> outside cutoff
+// Latitude offsets chosen with wide margins around the 500m cutoff so tests are
+// not sensitive to haversine rounding (~111m per 0.001deg latitude here).
+const CLOSE = 0.001; // ~111m -> closest
+const WITHIN = 0.003; // ~333m -> inside the cutoff
+const BEYOND = 0.006; // ~667m -> outside the cutoff
 
 type LabelSpec = {
   name: string;
@@ -55,73 +55,88 @@ describe('findNeighborhoodName', () => {
   });
 
   it('returns null when the general-tiles source is not loaded', () => {
-    const map = makeMap({ neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + NEAR }] }, { source: false });
+    const map = makeMap({ neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + CLOSE }] }, { source: false });
     expect(findNeighborhoodName(map, HOME)).toBeNull();
   });
 
   it('still queries when the map exposes no getSource', () => {
-    const map = makeMap({ neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + NEAR }] }, { noGetSource: true });
+    const map = makeMap({ neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + CLOSE }] }, { noGetSource: true });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
   });
 
   it('returns the nearest neighborhood label within range', () => {
     const map = makeMap({
       neighborhood_labels: [
-        { name: 'FarSide', lat: HOME[1] + MID },
-        { name: 'Greenpoint', lat: HOME[1] + NEAR },
+        { name: 'FarSide', lat: HOME[1] + WITHIN },
+        { name: 'Greenpoint', lat: HOME[1] + CLOSE },
       ],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
   });
 
   it('returns null when no labels exist in any layer', () => {
-    const map = makeMap({});
+    expect(findNeighborhoodName(makeMap({}), HOME)).toBeNull();
+  });
+
+  it('rejects labels beyond the cutoff', () => {
+    const map = makeMap({ neighborhood_labels: [{ name: 'TooFar', lat: HOME[1] + BEYOND }] });
     expect(findNeighborhoodName(map, HOME)).toBeNull();
   });
 
-  it('rejects labels beyond the 4000m cutoff', () => {
-    const map = makeMap({ neighborhood_labels: [{ name: 'TooFar', lat: HOME[1] + FAR }] });
-    expect(findNeighborhoodName(map, HOME)).toBeNull();
-  });
-
-  it('prefers neighborhood_labels over suburb_labels even when a suburb is closer', () => {
+  it('prefers a closer suburb over a farther neighborhood (nearest wins)', () => {
     const map = makeMap({
-      neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + MID }],
-      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + NEAR }],
+      neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + WITHIN }],
+      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + CLOSE }],
+    });
+    expect(findNeighborhoodName(map, HOME)).toBe('Brooklyn');
+  });
+
+  it('prefers a closer neighborhood over a farther suburb', () => {
+    const map = makeMap({
+      neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + CLOSE }],
+      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + WITHIN }],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
   });
 
-  it('falls back to suburb_labels when the nearest neighborhood is out of range', () => {
+  it('uses a suburb when no neighborhood is within range', () => {
     const map = makeMap({
-      neighborhood_labels: [{ name: 'TooFar', lat: HOME[1] + FAR }],
-      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + NEAR }],
+      neighborhood_labels: [{ name: 'Far', lat: HOME[1] + BEYOND }],
+      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + CLOSE }],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Brooklyn');
   });
 
-  it('falls back to suburb_labels when there are no neighborhood labels', () => {
-    const map = makeMap({ suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + NEAR }] });
+  it('uses a suburb when there are no neighborhood labels', () => {
+    const map = makeMap({ suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + CLOSE }] });
     expect(findNeighborhoodName(map, HOME)).toBe('Brooklyn');
   });
 
-  it('falls back to city_labels as a last resort', () => {
-    const map = makeMap({ city_labels: [{ name: 'New York', lat: HOME[1] + NEAR }] });
-    expect(findNeighborhoodName(map, HOME)).toBe('New York');
+  it('ignores city labels even when they are the closest', () => {
+    const map = makeMap({
+      city_labels: [{ name: 'New York', lat: HOME[1] + CLOSE }],
+      suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + WITHIN }],
+    });
+    expect(findNeighborhoodName(map, HOME)).toBe('Brooklyn');
   });
 
-  it('returns null when every layer is out of range', () => {
+  it('returns null when only city labels are nearby', () => {
+    const map = makeMap({ city_labels: [{ name: 'New York', lat: HOME[1] + CLOSE }] });
+    expect(findNeighborhoodName(map, HOME)).toBeNull();
+  });
+
+  it('returns null when every neighborhood/suburb label is out of range', () => {
     const map = makeMap({
-      neighborhood_labels: [{ name: 'a', lat: HOME[1] + FAR }],
-      suburb_labels: [{ name: 'b', lat: HOME[1] + FAR }],
-      city_labels: [{ name: 'c', lat: HOME[1] + FAR }],
+      neighborhood_labels: [{ name: 'a', lat: HOME[1] + BEYOND }],
+      suburb_labels: [{ name: 'b', lat: HOME[1] + BEYOND }],
+      city_labels: [{ name: 'c', lat: HOME[1] + CLOSE }],
     });
     expect(findNeighborhoodName(map, HOME)).toBeNull();
   });
 
   it('uses the first point of a MultiPoint label', () => {
     const map = makeMap({
-      neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + NEAR, geom: 'MultiPoint' }],
+      neighborhood_labels: [{ name: 'Greenpoint', lat: HOME[1] + CLOSE, geom: 'MultiPoint' }],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
   });
@@ -130,7 +145,7 @@ describe('findNeighborhoodName', () => {
     const map = makeMap({
       neighborhood_labels: [
         { name: 'NoGeom', geom: 'none' },
-        { name: 'Greenpoint', lat: HOME[1] + NEAR },
+        { name: 'Greenpoint', lat: HOME[1] + CLOSE },
       ],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
@@ -139,9 +154,9 @@ describe('findNeighborhoodName', () => {
   it('skips features whose name is missing, empty, or not a string', () => {
     const map = makeMap({
       neighborhood_labels: [
-        { name: '', lat: HOME[1] + NEAR },
-        { name: 'x', lat: HOME[1] + NEAR, props: { name: 123 } },
-        { name: 'Greenpoint', lat: HOME[1] + NEAR },
+        { name: '', lat: HOME[1] + CLOSE },
+        { name: 'x', lat: HOME[1] + CLOSE, props: { name: 123 } },
+        { name: 'Greenpoint', lat: HOME[1] + CLOSE },
       ],
     });
     expect(findNeighborhoodName(map, HOME)).toBe('Greenpoint');
@@ -150,8 +165,8 @@ describe('findNeighborhoodName', () => {
   it('skips a layer whose tiles throw and continues to the next', () => {
     const map = makeMap(
       {
-        neighborhood_labels: [{ name: 'Broken', lat: HOME[1] + NEAR }],
-        suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + NEAR }],
+        neighborhood_labels: [{ name: 'Broken', lat: HOME[1] + CLOSE }],
+        suburb_labels: [{ name: 'Brooklyn', lat: HOME[1] + CLOSE }],
       },
       { throwLayers: ['neighborhood_labels'] },
     );

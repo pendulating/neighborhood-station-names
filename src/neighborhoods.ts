@@ -1,26 +1,34 @@
 /**
- * Look up the nearest neighborhood name for a coordinate, from the base map's
- * vector tiles.
+ * Look up the nearest neighborhood or suburb name for a coordinate, from the
+ * base map's vector tiles.
  *
- * Neighborhood names are not in the city data files — they live in the
- * `general-tiles` vector source as point labels. We query the loaded tiles and
- * pick the nearest label to the station. Source-layers are tried in order of
- * specificity so areas without a neighborhood still get a sensible name.
+ * Neighborhood names are not in the city data files; they live in the
+ * `general-tiles` vector source as point labels. Rather than casting a wide
+ * radius per layer and taking the first layer that has anything, we gather
+ * every nearby neighborhood and suburb label and select the single nearest one
+ * (a k-nearest-neighbours selection with the nearest neighbour winning). This
+ * lets a closer suburb be chosen over a more distant neighborhood.
+ *
+ * City labels are deliberately excluded: they are too coarse for station naming,
+ * so when nothing local qualifies we leave the game's road-based name in place.
  */
 
 import type { Coordinate } from './types/core';
 
 const SOURCE_ID = 'general-tiles';
 
-/** Most specific first. A station falls back to the next if none is found nearby. */
-const LABEL_SOURCE_LAYERS = ['neighborhood_labels', 'suburb_labels', 'city_labels'] as const;
+/**
+ * Label layers considered for naming. The nearest label across both wins, so
+ * order is not a priority. `city_labels` is intentionally omitted (see above).
+ */
+const LABEL_SOURCE_LAYERS = ['neighborhood_labels', 'suburb_labels'] as const;
 
 /**
- * How far (in meters) a label may be from the station and still be used.
- * Neighborhood labels sit at area centroids, so we allow a generous radius;
- * `city_labels` can be far, so it acts mainly as a last resort.
+ * How far (in metres) a label may be from the station and still be used. Beyond
+ * this we leave the game's road-based name in place. Deliberately tight: labels
+ * sit at area centroids, and we only want genuinely local names.
  */
-const MAX_LABEL_DISTANCE_M = 4000;
+const MAX_LABEL_DISTANCE_M = 500;
 
 interface Candidate {
   name: string;
@@ -28,47 +36,42 @@ interface Candidate {
 }
 
 /**
- * Returns the nearest neighborhood/suburb/city label name to `coords`, or null
- * if the map, source, or tiles aren't available (caller should leave the
- * existing road-based name in that case).
+ * Returns the name of the nearest neighborhood/suburb label within
+ * `MAX_LABEL_DISTANCE_M` of `coords`, or null if the map/source is unavailable
+ * or nothing qualifies (caller should leave the existing road-based name).
  */
 export function findNeighborhoodName(map: MaplibreLike | null, coords: Coordinate): string | null {
   if (!map || typeof map.querySourceFeatures !== 'function') return null;
   if (typeof map.getSource === 'function' && !map.getSource(SOURCE_ID)) return null;
 
+  let best: Candidate | null = null;
   for (const sourceLayer of LABEL_SOURCE_LAYERS) {
-    const nearest = nearestLabel(map, sourceLayer, coords);
-    if (nearest && nearest.distanceM <= MAX_LABEL_DISTANCE_M) {
-      return nearest.name;
+    for (const feature of queryFeatures(map, sourceLayer)) {
+      const name = feature?.properties?.name;
+      const point = pointOf(feature);
+      if (typeof name !== 'string' || !name || !point) continue;
+
+      const distanceM = haversineMeters(coords, point);
+      if (distanceM > MAX_LABEL_DISTANCE_M) continue;
+      if (!best || distanceM < best.distanceM) {
+        best = { name, distanceM };
+      }
     }
   }
-  return null;
+  return best ? best.name : null;
 }
 
-function nearestLabel(map: MaplibreLike, sourceLayer: string, coords: Coordinate): Candidate | null {
-  let features: MapFeature[];
+/** Query a single source-layer, returning [] if its tiles fail to load. */
+function queryFeatures(map: MaplibreLike, sourceLayer: string): MapFeature[] {
   try {
-    features = map.querySourceFeatures(SOURCE_ID, {
+    const features = map.querySourceFeatures(SOURCE_ID, {
       sourceLayer,
       filter: ['has', 'name'],
     });
+    return features ?? [];
   } catch {
-    return null;
+    return [];
   }
-  if (!features || features.length === 0) return null;
-
-  let best: Candidate | null = null;
-  for (const feature of features) {
-    const name = feature?.properties?.name;
-    const point = pointOf(feature);
-    if (typeof name !== 'string' || !name || !point) continue;
-
-    const distanceM = haversineMeters(coords, point);
-    if (!best || distanceM < best.distanceM) {
-      best = { name, distanceM };
-    }
-  }
-  return best;
 }
 
 /** Extract a representative [lng, lat] from a feature's geometry. */
