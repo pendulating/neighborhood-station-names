@@ -2,7 +2,7 @@
   "id": "neighborhood-station-names",
   "name": "Neighborhood Station Names",
   "description": "Names stations after the nearest neighborhood label instead of nearby roads. Toggle in Settings.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": {
     "name": "Matt Franchi",
     "url": "https://mfranchi.net"
