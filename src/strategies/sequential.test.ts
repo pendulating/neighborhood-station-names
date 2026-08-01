@@ -87,4 +87,35 @@ describe('sequentialStrategy', () => {
     const result = run(makeCtx({ routeStationOrder: null, map: null }));
     expect(result).toEqual([]);
   });
+
+  it('falls back to spatial when station is not found in route order', () => {
+    const result = run(makeCtx({
+      stationId: 'unknown',
+      routeStationOrder: ['s0', 's1', 's2'],
+      map: null,
+    }));
+    expect(result).toEqual([]);
+  });
+
+  it('falls back to spatial when route order is empty', () => {
+    const result = run(makeCtx({ routeStationOrder: [], map: null }));
+    expect(result).toEqual([]);
+  });
+
+  it('handles an unrecognised format by defaulting to numeric', () => {
+    const result = run(makeCtx({
+      settings: { ...makeCtx().settings, sequentialFormat: 'bogus' as never },
+      routeStationOrder: ['s0', 's1'],
+    }));
+    expect(result[0].name).toBe('2');
+  });
+
+  it('returns Central for a single-station route in compass format', () => {
+    const result = run(makeCtx({
+      stationId: 's0',
+      settings: { ...makeCtx().settings, sequentialFormat: 'compass' },
+      routeStationOrder: ['s0'],
+    }));
+    expect(result[0].name).toBe('Central');
+  });
 });

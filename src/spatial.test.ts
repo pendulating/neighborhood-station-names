@@ -44,6 +44,15 @@ describe('findNameCandidates', () => {
     expect(candidates).toEqual([]);
   });
 
+  it('returns empty array when the source is missing from the map', () => {
+    const map: MaplibreLike = {
+      querySourceFeatures: () => [],
+      getSource: () => undefined,
+    };
+    const candidates = findNameCandidates(map, [-73.95, 40.73], settings);
+    expect(candidates).toEqual([]);
+  });
+
   it('excludes features beyond the search radius', () => {
     const map = makeMap([
       { name: 'Far Away', lng: -73.0, lat: 41.5, layer: 'neighborhood_labels' },
@@ -62,5 +71,47 @@ describe('findNameCandidates', () => {
     const candidates = findNameCandidates(map, [-73.95, 40.73], settings);
     expect(candidates[0].name).toBe('Near');
     expect(candidates[0].score).toBeGreaterThan(candidates[1].score);
+  });
+
+  it('handles MultiPoint geometry by using the first point', () => {
+    const map: MaplibreLike = {
+      querySourceFeatures: (_sourceId: string, params: { sourceLayer?: string }) => {
+        if (params.sourceLayer !== 'neighborhood_labels') return [];
+        return [{
+          geometry: { type: 'MultiPoint', coordinates: [[-73.95, 40.73], [-73.96, 40.74]] },
+          properties: { name: 'MultiPlace' },
+        }];
+      },
+      getSource: () => ({}),
+    };
+
+    const candidates = findNameCandidates(map, [-73.95, 40.73], settings);
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0].name).toBe('MultiPlace');
+    expect(candidates[0].featureCoords).toEqual([-73.95, 40.73]);
+  });
+
+  it('skips features with invalid geometry', () => {
+    const map: MaplibreLike = {
+      querySourceFeatures: () => [
+        { geometry: undefined, properties: { name: 'NoGeom' } },
+        { geometry: { type: 'LineString', coordinates: [[-73.95, 40.73]] }, properties: { name: 'Line' } },
+        { geometry: { type: 'MultiPoint', coordinates: [] }, properties: { name: 'EmptyMulti' } },
+      ],
+      getSource: () => ({}),
+    };
+
+    const candidates = findNameCandidates(map, [-73.95, 40.73], settings);
+    expect(candidates).toEqual([]);
+  });
+
+  it('returns empty when querySourceFeatures throws', () => {
+    const map: MaplibreLike = {
+      querySourceFeatures: () => { throw new Error('tile load failed'); },
+      getSource: () => ({}),
+    };
+
+    const candidates = findNameCandidates(map, [-73.95, 40.73], settings);
+    expect(candidates).toEqual([]);
   });
 });

@@ -72,6 +72,18 @@ describe('settings', () => {
     expect(isEnabled()).toBe(true);
   });
 
+  it('treats a stored array as default', async () => {
+    localStorage.setItem(STORAGE_KEY, '[1,2,3]');
+    const { isEnabled } = await loadSettings();
+    expect(isEnabled()).toBe(true);
+  });
+
+  it('treats a stored null as default', async () => {
+    localStorage.setItem(STORAGE_KEY, 'null');
+    const { isEnabled } = await loadSettings();
+    expect(isEnabled()).toBe(true);
+  });
+
   it('defaults to enabled when reading storage throws', async () => {
     installStorageStub({
       getItem: () => {

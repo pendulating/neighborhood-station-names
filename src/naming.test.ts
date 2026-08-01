@@ -310,6 +310,44 @@ describe('settings changes do not rename existing stations', () => {
   });
 });
 
+describe('sequential mode route ordering', () => {
+  it('passes route station order to the strategy context in sequential mode', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'sequential',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
+    mockCandidates
+      .mockReturnValueOnce([makeCandidate('1')])
+      .mockReturnValueOnce([makeCandidate('2')]);
+    const s1 = makeStation({ id: 's1', routeIds: ['r1'] });
+    const s2 = makeStation({ id: 's2', trackGroupId: 'g2', routeIds: ['r1'] });
+    vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
+    const routes: Route[] = [{ id: 'r1', stations: [{ id: 's1' }, { id: 's2' }] }] as unknown as Route[];
+    const api = makeApi([], routes);
+
+    expect(await applyToAllStations(api)).toBe(2);
+  });
+
+  it('handles a station with no route gracefully in sequential mode', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'sequential',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
+    mockCandidates.mockReturnValue([makeCandidate('1')]);
+    const s1 = makeStation({ id: 's1', routeIds: [] });
+    vi.mocked(getStore).mockReturnValue({ stations: [s1], updateStationName: vi.fn() } as never);
+    const api = makeApi();
+
+    expect(await applyToAllStations(api)).toBe(1);
+  });
+});
+
 describe('scheduleApplyToAllStations', () => {
   beforeEach(() => {
     vi.useFakeTimers();

@@ -25,6 +25,7 @@ function makeMockApi() {
   const toggles: Array<Record<string, unknown>> = [];
   const buttons: Array<Record<string, unknown>> = [];
   const selects: Array<Record<string, unknown>> = [];
+  const sliders: Array<Record<string, unknown>> = [];
   const notifications: Array<{ message: string; type?: string }> = [];
   const on = (name: string) => (cb: Handler) => {
     (handlers[name] ??= []).push(cb);
@@ -41,7 +42,9 @@ function makeMockApi() {
       addSelect: vi.fn((_placement: string, opts: Record<string, unknown>) => {
         selects.push(opts);
       }),
-      addSlider: vi.fn(),
+      addSlider: vi.fn((_placement: string, opts: Record<string, unknown>) => {
+        sliders.push(opts);
+      }),
       addText: vi.fn(),
       addSeparator: vi.fn(),
       addStyledSlider: vi.fn(),
@@ -56,7 +59,7 @@ function makeMockApi() {
       onStationBuilt: on('stationBuilt'),
     },
   };
-  return { api, handlers, toggles, buttons, selects, notifications };
+  return { api, handlers, toggles, buttons, selects, sliders, notifications };
 }
 
 // main.ts reads window.SubwayBuilderAPI at import time and keeps module-level
@@ -209,5 +212,44 @@ describe('main wiring', () => {
     await Promise.resolve();
 
     expect(mock.notifications.some((n) => n.type === 'info' && /no stations renamed/i.test(n.message))).toBe(true);
+  });
+
+  it('mode select change persists the setting and resets processed stations', async () => {
+    const mock = makeMockApi();
+    const { naming, settings } = await loadMain(mock.api);
+    fireMapReady(mock.handlers);
+
+    const modeSelect = mock.selects.find((s) => s.id === 'neighborhood-station-names.mode');
+    expect(modeSelect).toBeDefined();
+    (modeSelect!.onChange as (v: string) => void)('street');
+
+    expect(settings.updateSettings).toHaveBeenCalledWith({ mode: 'street' });
+    expect(naming.resetProcessed).toHaveBeenCalled();
+    expect(mock.notifications.some((n) => n.message.includes('Street'))).toBe(true);
+  });
+
+  it('disambiguation select change persists the setting', async () => {
+    const mock = makeMockApi();
+    const { settings } = await loadMain(mock.api);
+    fireMapReady(mock.handlers);
+
+    const disambigSelect = mock.selects.find((s) => s.id === 'neighborhood-station-names.disambiguation');
+    expect(disambigSelect).toBeDefined();
+    (disambigSelect!.onChange as (v: string) => void)('compass');
+
+    expect(settings.updateSettings).toHaveBeenCalledWith({ disambiguation: 'compass' });
+    expect(mock.notifications.some((n) => n.message.includes('Compass'))).toBe(true);
+  });
+
+  it('radius slider change persists the setting', async () => {
+    const mock = makeMockApi();
+    const { settings } = await loadMain(mock.api);
+    fireMapReady(mock.handlers);
+
+    expect(mock.sliders).toHaveLength(1);
+    (mock.sliders[0].onChange as (v: number) => void)(750);
+
+    expect(settings.updateSettings).toHaveBeenCalledWith({ radiusM: 750 });
+    expect(mock.notifications.some((n) => n.message.includes('750'))).toBe(true);
   });
 });
