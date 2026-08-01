@@ -1,15 +1,18 @@
 /**
- * Orchestrates neighborhood-based station naming: scan the stations in the store
- * and rename each to its nearest neighborhood/suburb label via the game's store.
- * A neighborhood/suburb name is assigned to at most one station; a station that
- * would duplicate a name already in use keeps its road-based name instead.
+ * Orchestrates station naming via the active strategy: consult the strategy
+ * for candidates, pick the best, and disambiguate on collision.  A name is
+ * assigned to at most one station; a station that would duplicate a name
+ * already in use keeps its road-based name unless disambiguation succeeds.
  */
 
 import type { ModdingAPI } from './types/api';
-import type { Station } from './types/game-state';
+import type { Station, Route } from './types/game-state';
+import type { MaplibreLike, StrategyContext, NameCandidate } from './types/naming';
 import { getStore, setStationName, refreshStationName } from './store';
-import { findNeighborhoodName, type MaplibreLike } from './neighborhoods';
-import { isEnabled } from './settings';
+import { getSettings } from './settings';
+import { getStrategy } from './strategies';
+import { disambiguate } from './disambiguation';
+import type { DisambiguationOptions } from './disambiguation';
 
 const TAG = '[NeighborhoodNames]';
 
@@ -23,27 +26,69 @@ function getAllStations(api: ModdingAPI): Station[] {
 }
 
 /**
+ * Build the ordered list of station IDs for the route that a station belongs to.
+ * Returns null when the route has no stations array or the route is not found.
+ */
+function computeRouteOrder(
+  station: Station,
+  routes: Route[],
+): string[] | null {
+  const primaryRouteId = station.routeIds[0];
+  if (!primaryRouteId) return null;
+  const route = routes.find((r) => r.id === primaryRouteId);
+  if (!route?.stations || route.stations.length === 0) return null;
+  return route.stations.map((s) => s.id);
+}
+
+/**
+ * Build a {@link StrategyContext} for a single station.
+ */
+function buildContext(
+  station: Station,
+  map: MaplibreLike | null,
+  usedNames: ReadonlySet<string>,
+  routes: Route[],
+): StrategyContext {
+  const settings = getSettings();
+  const routeStationOrder =
+    settings.mode === 'sequential'
+      ? computeRouteOrder(station, routes)
+      : undefined;
+
+  return {
+    coords: station.coords,
+    stationId: station.id,
+    routeIds: station.routeIds,
+    map,
+    settings,
+    usedNames,
+    routeStationOrder,
+  };
+}
+
+/**
  * Re-scan every station and rename any not yet processed. Used on blueprint
  * placement / construction hooks and by the "rename existing stations" action.
  *
- * A neighborhood/suburb name is handed out to at most one station: uniqueness is
- * enforced globally rather than per line, because stations on a line still being
- * built have no route yet and so can't be scoped by line. When a station would
- * take a name another station already has, it keeps its road-based name (recomputed
- * via refresh when it had already been assigned the duplicate). The player is free
- * to rename stations by hand afterwards.
+ * A neighborhood/suburb/landmark name is handed out to at most one station:
+ * uniqueness is enforced globally. When a station would take a name another
+ * station already has, the orchestrator runs disambiguation. If that also
+ * collides, the station keeps its road-based name (recomputed via refresh when
+ * it had already been assigned the duplicate). The player is free to rename
+ * stations by hand afterwards.
  *
- * @param force  when true, ignores the processed set (used by the manual button
+ * @param force  When true, ignores the processed set (used by the manual button
  *               so the user can re-apply, and to undo pre-existing duplicates).
  */
-export function applyToAllStations(api: ModdingAPI, force = false): number {
-  if (!isEnabled()) return 0;
+export async function applyToAllStations(
+  api: ModdingAPI,
+  force = false,
+): Promise<number> {
+  const settings = getSettings();
+  if (!settings.enabled) return 0;
   const stations = getAllStations(api);
   if (stations.length === 0) return 0;
 
-  // Neighborhood/suburb names already handed out. Seeded with the names of
-  // stations we will not rename (already processed) so a name assigned earlier is
-  // never given to a second station.
   const usedNames = new Set<string>();
   for (const station of stations) {
     if (force) processed.delete(station.id);
@@ -51,26 +96,60 @@ export function applyToAllStations(api: ModdingAPI, force = false): number {
   }
 
   const map = api.utils.getMap() as unknown as MaplibreLike | null;
+  const strategy = getStrategy(settings.mode);
+  const routes = api.gameState.getRoutes();
+
   let renamed = 0;
   for (const station of stations) {
     if (processed.has(station.id)) continue;
 
-    const name = findNeighborhoodName(map, station.coords);
-    if (!name) continue; // no neighborhood; keep the road name
-    if (usedNames.has(name)) {
-      // Another station already has this name; fall back to the road-based name.
-      if (force && station.name === name) refreshStationName(station.id); // undo a prior duplicate
+    const ctx = buildContext(station, map, usedNames, routes);
+
+    const candidates: NameCandidate[] = await strategy.candidates(ctx);
+
+    if (candidates.length === 0) continue;
+
+    // Pick the top candidate whose name is not already used.
+    let chosenName: string | null = null;
+    for (const candidate of candidates) {
+      if (!usedNames.has(candidate.name)) {
+        chosenName = candidate.name;
+        break;
+      }
+    }
+
+    // All candidates collided — try disambiguation with the top candidate.
+    if (chosenName === null) {
+      const top = candidates[0];
+      const disambigOpts: DisambiguationOptions = {
+        takenName: top.name,
+        stationCoords: station.coords,
+        featureCoords: top.featureCoords ?? station.coords,
+        candidates,
+        style: settings.disambiguation,
+        usedNames,
+      };
+      const disambiguated = disambiguate(disambigOpts);
+      if (disambiguated !== null && !usedNames.has(disambiguated)) {
+        chosenName = disambiguated;
+      }
+    }
+
+    if (chosenName === null) {
+      // No usable name — ensure the station keeps its road name.
+      if (force) refreshStationName(station.id);
       continue; // left unprocessed so it can take the name if it frees up later
     }
-    if (station.name === name) {
+
+    if (station.name === chosenName) {
       processed.add(station.id);
-      usedNames.add(name); // already correct
+      usedNames.add(chosenName); // already correct
       continue;
     }
 
-    if (!setStationName(station.id, name)) continue; // store not ready; retry later
-    console.log(`${TAG} "${station.name}" -> "${name}" (${station.id})`);
-    usedNames.add(name);
+    if (!setStationName(station.id, chosenName)) continue; // store not ready; retry later
+    console.log(`${TAG} "${station.name}" -> "${chosenName}" (${station.id})`);
+    usedNames.add(chosenName);
     processed.add(station.id);
     renamed++;
   }
@@ -91,14 +170,27 @@ export function resetProcessed(): void {
  */
 let applyTimer: ReturnType<typeof setTimeout> | null = null;
 
-export function scheduleApplyToAllStations(api: ModdingAPI, delay = 0): void {
-  if (applyTimer !== null) clearTimeout(applyTimer);
-  applyTimer = setTimeout(() => {
-    applyTimer = null;
-    try {
-      applyToAllStations(api);
-    } catch (err) {
-      console.error(`${TAG} Error in deferred naming:`, err);
-    }
-  }, delay);
+/**
+ * Schedule a deferred application of station naming. Debounces rapid calls.
+ *
+ * @param api   The Modding API instance.
+ * @param delay Delay in milliseconds before applying (default 0 = next tick).
+ */
+export async function scheduleApplyToAllStations(
+  api: ModdingAPI,
+  delay = 0,
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (applyTimer !== null) clearTimeout(applyTimer);
+    applyTimer = setTimeout(async () => {
+      applyTimer = null;
+      try {
+        await applyToAllStations(api);
+      } catch (err) {
+        console.error(`${TAG} Error in deferred naming:`, err);
+      } finally {
+        resolve();
+      }
+    }, delay);
+  });
 }

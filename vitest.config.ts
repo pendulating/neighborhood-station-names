@@ -11,6 +11,9 @@ export default defineConfig({
   define: {
     __MOD_VERSION__: JSON.stringify(manifest.version),
   },
+  resolve: {
+    extensions: ['.ts', '.tsx', '.d.ts', '.js', '.jsx'],
+  },
   test: {
     environment: 'happy-dom',
     setupFiles: ['./vitest.setup.ts'],

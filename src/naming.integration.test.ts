@@ -1,13 +1,35 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Only the map lookup is mocked; the real store bridge and naming orchestration
-// run, so this exercises the same write path the game uses.
-vi.mock('./neighborhoods', () => ({ findNeighborhoodName: vi.fn() }));
+const mockCandidates = vi.fn<() => NameCandidate[]>(() => []);
+
+vi.mock('./strategies', () => ({
+  getStrategy: vi.fn(() => ({
+    id: 'neighborhood' as const,
+    candidates: mockCandidates,
+  })),
+}));
+
+vi.mock('./disambiguation', () => ({
+  disambiguate: vi.fn(() => null),
+}));
+
+vi.mock('./settings', () => ({
+  getSettings: vi.fn(() => ({
+    enabled: true,
+    mode: 'neighborhood' as const,
+    disambiguation: 'auto' as const,
+    radiusM: 500,
+    sequentialFormat: 'number' as const,
+  })),
+  updateSettings: vi.fn(),
+  isEnabled: vi.fn(() => true),
+  setEnabled: vi.fn(),
+}));
 
 import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
-import { findNeighborhoodName } from './neighborhoods';
 import type { ModdingAPI } from './types/api';
-import type { Station } from './types/game-state';
+import type { Station, Route } from './types/game-state';
+import type { NameCandidate } from './types/naming';
 import type { MainStoreState, UpdateStationNamePayload } from './types/store';
 
 function makeStation(over: Partial<Station> = {}): Station {
@@ -26,6 +48,10 @@ function makeStation(over: Partial<Station> = {}): Station {
   };
 }
 
+function makeCandidate(name: string): NameCandidate {
+  return { name, source: 'neighborhood', distanceM: 100, score: 0.8 };
+}
+
 // A stand-in for the game's Zustand store: updateStationName mutates the live
 // stations array exactly like the real action does.
 function installGameStore(stations: Station[]): MainStoreState {
@@ -40,17 +66,17 @@ function installGameStore(stations: Station[]): MainStoreState {
   return store;
 }
 
-function makeApi(stations: Station[]): ModdingAPI {
+function makeApi(stations: Station[], routes: Route[] = []): ModdingAPI {
   return {
-    utils: { getMap: () => ({}) },
-    gameState: { getStations: () => stations },
+    utils: { getMap: () => ({}), getCityCode: () => 'NYC' },
+    gameState: { getStations: () => stations, getRoutes: () => routes },
   } as unknown as ModdingAPI;
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
   resetProcessed();
-  vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
 });
 
 afterEach(() => {
@@ -59,67 +85,64 @@ afterEach(() => {
 });
 
 describe('naming integration (real store bridge)', () => {
-  it('a deferred rename survives the game recomputing names after the hook', () => {
+  it('a deferred rename survives the game recomputing names after the hook', async () => {
     const stations = [makeStation()];
     installGameStore(stations);
     const api = makeApi(stations);
 
-    // setTracks fires the hook (mod schedules a deferred rename)...
     scheduleApplyToAllStations(api);
-    // ...then recomputes the stations array from a stale snapshot, clobbering
-    // any synchronous rename back to the road name:
     stations[0].name = 'Road St';
 
-    // Nothing has been renamed yet — the deferral has not fired.
     expect(stations[0].name).toBe('Road St');
 
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
 
-    // The deferred rename is the last write, so the neighborhood name wins.
     expect(stations[0].name).toBe('Greenpoint');
   });
 
-  it('demonstrates the hazard: a synchronous rename is clobbered', () => {
+  it('demonstrates the hazard: a synchronous rename is clobbered', async () => {
     const stations = [makeStation()];
     installGameStore(stations);
     const api = makeApi(stations);
 
-    applyToAllStations(api); // synchronous rename
+    await applyToAllStations(api);
     expect(stations[0].name).toBe('Greenpoint');
 
-    // The game's post-hook recompute overwrites it...
     stations[0].name = 'Road St';
-    expect(stations[0].name).toBe('Road St'); // ...which is exactly why we defer.
+    expect(stations[0].name).toBe('Road St');
   });
 
-  it('does not revert a manual rename once the mod has named a station', () => {
+  it('does not revert a manual rename once the mod has named a station', async () => {
     const stations = [makeStation()];
     installGameStore(stations);
     const api = makeApi(stations);
 
     scheduleApplyToAllStations(api);
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(stations[0].name).toBe('Greenpoint');
 
-    // The player renames the station by hand.
     stations[0].name = 'Penn Station';
 
-    // A later placement triggers another deferred scan; it must not fight the player.
     scheduleApplyToAllStations(api);
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(stations[0].name).toBe('Penn Station');
   });
 
-  it('renames every new station in a batch after the clobber settles', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValueOnce('Greenpoint').mockReturnValueOnce('Bushwick');
-    const stations = [makeStation({ id: 's1' }), makeStation({ id: 's2', trackGroupId: 'g2', name: 'Other Rd' })];
+  it('renames every new station in a batch after the clobber settles', async () => {
+    mockCandidates
+      .mockReturnValueOnce([makeCandidate('Greenpoint')])
+      .mockReturnValueOnce([makeCandidate('Bushwick')]);
+    const stations = [
+      makeStation({ id: 's1' }),
+      makeStation({ id: 's2', trackGroupId: 'g2', name: 'Other Rd' }),
+    ];
     installGameStore(stations);
     const api = makeApi(stations);
 
     scheduleApplyToAllStations(api);
-    for (const s of stations) s.name = 'Road St'; // game clobbers the whole batch
+    for (const s of stations) s.name = 'Road St';
 
-    vi.advanceTimersByTime(1);
+    await vi.advanceTimersByTimeAsync(1);
     expect(stations[0].name).toBe('Greenpoint');
     expect(stations[1].name).toBe('Bushwick');
   });

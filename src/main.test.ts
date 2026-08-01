@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./naming', () => ({
-  applyToAllStations: vi.fn(() => 0),
+  applyToAllStations: vi.fn(() => Promise.resolve(0)),
   resetProcessed: vi.fn(),
   scheduleApplyToAllStations: vi.fn(),
 }));
 vi.mock('./settings', () => ({
+  getSettings: vi.fn(() => ({
+    enabled: true,
+    mode: 'neighborhood' as const,
+    disambiguation: 'auto' as const,
+    radiusM: 500,
+    sequentialFormat: 'number' as const,
+  })),
+  updateSettings: vi.fn(),
   isEnabled: vi.fn(() => true),
   setEnabled: vi.fn(),
 }));
@@ -16,6 +24,7 @@ function makeMockApi() {
   const handlers: Record<string, Handler[]> = {};
   const toggles: Array<Record<string, unknown>> = [];
   const buttons: Array<Record<string, unknown>> = [];
+  const selects: Array<Record<string, unknown>> = [];
   const notifications: Array<{ message: string; type?: string }> = [];
   const on = (name: string) => (cb: Handler) => {
     (handlers[name] ??= []).push(cb);
@@ -29,6 +38,14 @@ function makeMockApi() {
       addButton: vi.fn((_placement: string, opts: Record<string, unknown>) => {
         buttons.push(opts);
       }),
+      addSelect: vi.fn((_placement: string, opts: Record<string, unknown>) => {
+        selects.push(opts);
+      }),
+      addSlider: vi.fn(),
+      addText: vi.fn(),
+      addSeparator: vi.fn(),
+      addStyledSlider: vi.fn(),
+      unregisterComponent: vi.fn(),
       showNotification: vi.fn((message: string, type?: string) => {
         notifications.push({ message, type });
       }),
@@ -39,7 +56,7 @@ function makeMockApi() {
       onStationBuilt: on('stationBuilt'),
     },
   };
-  return { api, handlers, toggles, buttons, notifications };
+  return { api, handlers, toggles, buttons, selects, notifications };
 }
 
 // main.ts reads window.SubwayBuilderAPI at import time and keeps module-level
@@ -127,7 +144,7 @@ describe('main wiring', () => {
     const onChange = mock.toggles[0].onChange as (value: boolean) => void;
     onChange(false);
 
-    expect(settings.setEnabled).toHaveBeenCalledWith(false);
+    expect(settings.updateSettings).toHaveBeenCalledWith({ enabled: false });
     expect(naming.resetProcessed).toHaveBeenCalledTimes(1);
     expect(mock.notifications.some((n) => n.type === 'info')).toBe(true);
   });
@@ -135,7 +152,13 @@ describe('main wiring', () => {
   it('rename button warns and does nothing while disabled', async () => {
     const mock = makeMockApi();
     const { naming, settings } = await loadMain(mock.api);
-    vi.mocked(settings.isEnabled).mockReturnValue(false);
+    vi.mocked(settings.getSettings).mockReturnValue({
+      enabled: false,
+      mode: 'neighborhood',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
     fireMapReady(mock.handlers);
 
     const onClick = mock.buttons[0].onClick as () => void;
@@ -148,12 +171,21 @@ describe('main wiring', () => {
   it('rename button force-applies to existing stations when enabled', async () => {
     const mock = makeMockApi();
     const { naming, settings } = await loadMain(mock.api);
-    vi.mocked(settings.isEnabled).mockReturnValue(true);
-    vi.mocked(naming.applyToAllStations).mockReturnValue(3);
+    vi.mocked(settings.getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'neighborhood',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
+    vi.mocked(naming.applyToAllStations).mockResolvedValue(3);
     fireMapReady(mock.handlers);
 
     const onClick = mock.buttons[0].onClick as () => void;
     onClick();
+
+    // Flush the microtask queue so the .then() notification fires.
+    await Promise.resolve();
 
     expect(naming.applyToAllStations).toHaveBeenCalledWith(mock.api, true);
     expect(mock.notifications.some((n) => n.type === 'success' && n.message.includes('3'))).toBe(true);
@@ -162,11 +194,19 @@ describe('main wiring', () => {
   it('rename button reports when nothing was renamed', async () => {
     const mock = makeMockApi();
     const { naming, settings } = await loadMain(mock.api);
-    vi.mocked(settings.isEnabled).mockReturnValue(true);
-    vi.mocked(naming.applyToAllStations).mockReturnValue(0);
+    vi.mocked(settings.getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'neighborhood',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
+    vi.mocked(naming.applyToAllStations).mockResolvedValue(0);
     fireMapReady(mock.handlers);
 
     (mock.buttons[0].onClick as () => void)();
+
+    await Promise.resolve();
 
     expect(mock.notifications.some((n) => n.type === 'info' && /no stations renamed/i.test(n.message))).toBe(true);
   });

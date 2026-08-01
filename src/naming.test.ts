@@ -1,19 +1,43 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('./settings', () => ({ isEnabled: vi.fn(() => true) }));
+const mockCandidates = vi.fn<() => NameCandidate[]>(() => []);
+
+vi.mock('./strategies', () => ({
+  getStrategy: vi.fn(() => ({
+    id: 'neighborhood' as const,
+    candidates: mockCandidates,
+  })),
+}));
+
+vi.mock('./disambiguation', () => ({
+  disambiguate: vi.fn(() => null),
+}));
+
+vi.mock('./settings', () => ({
+  getSettings: vi.fn(() => ({
+    enabled: true,
+    mode: 'neighborhood' as const,
+    disambiguation: 'auto' as const,
+    radiusM: 500,
+    sequentialFormat: 'number' as const,
+  })),
+  updateSettings: vi.fn(),
+  isEnabled: vi.fn(() => true),
+  setEnabled: vi.fn(),
+}));
+
 vi.mock('./store', () => ({
   getStore: vi.fn(),
   setStationName: vi.fn(() => true),
   refreshStationName: vi.fn(() => true),
 }));
-vi.mock('./neighborhoods', () => ({ findNeighborhoodName: vi.fn() }));
 
 import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
-import { isEnabled } from './settings';
+import { getSettings } from './settings';
 import { getStore, setStationName, refreshStationName } from './store';
-import { findNeighborhoodName } from './neighborhoods';
 import type { ModdingAPI } from './types/api';
-import type { Station } from './types/game-state';
+import type { Station, Route } from './types/game-state';
+import type { NameCandidate } from './types/naming';
 
 function makeStation(over: Partial<Station> = {}): Station {
   return {
@@ -31,195 +55,258 @@ function makeStation(over: Partial<Station> = {}): Station {
   };
 }
 
-function makeApi(stations: Station[] = []): ModdingAPI {
+function makeCandidate(name: string): NameCandidate {
+  return { name, source: 'neighborhood', distanceM: 100, score: 0.8 };
+}
+
+function makeApi(stations: Station[] = [], routes: Route[] = []): ModdingAPI {
   return {
-    utils: { getMap: () => ({}) },
-    gameState: { getStations: () => stations },
+    utils: { getMap: () => ({}), getCityCode: () => 'NYC' },
+    gameState: { getStations: () => stations, getRoutes: () => routes },
   } as unknown as ModdingAPI;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   resetProcessed();
-  vi.mocked(isEnabled).mockReturnValue(true);
+  vi.mocked(getSettings).mockReturnValue({
+    enabled: true,
+    mode: 'neighborhood',
+    disambiguation: 'auto',
+    radiusM: 500,
+    sequentialFormat: 'number',
+  });
   vi.mocked(setStationName).mockReturnValue(true);
   vi.mocked(getStore).mockReturnValue(null);
-  vi.mocked(findNeighborhoodName).mockReturnValue(null);
+  mockCandidates.mockReturnValue([]);
 });
 
 describe('applyToAllStations', () => {
-  it('renames every unprocessed station from the store', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValueOnce('Greenpoint').mockReturnValueOnce('Bushwick');
+  it('renames every unprocessed station from the store', async () => {
+    mockCandidates
+      .mockReturnValueOnce([makeCandidate('Greenpoint')])
+      .mockReturnValueOnce([makeCandidate('Bushwick')]);
     const stations = [makeStation({ id: 's1' }), makeStation({ id: 's2', trackGroupId: 'g2' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(2);
+    expect(await applyToAllStations(api)).toBe(2);
     expect(setStationName).toHaveBeenCalledTimes(2);
   });
 
-  it('falls back to api.gameState.getStations when the store bridge is down', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('falls back to api.gameState.getStations when the store bridge is down', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     vi.mocked(getStore).mockReturnValue(null);
     const stations = [makeStation({ id: 's1' })];
     const api = makeApi(stations);
 
-    expect(applyToAllStations(api)).toBe(1);
+    expect(await applyToAllStations(api)).toBe(1);
     expect(setStationName).toHaveBeenCalledWith('s1', 'Greenpoint');
   });
 
-  it('returns 0 when there are no stations', () => {
+  it('returns 0 when there are no stations', async () => {
     vi.mocked(getStore).mockReturnValue({ stations: [], updateStationName: vi.fn() } as never);
-    expect(applyToAllStations(makeApi())).toBe(0);
+    expect(await applyToAllStations(makeApi())).toBe(0);
 
     vi.mocked(getStore).mockReturnValue(null);
-    expect(applyToAllStations(makeApi([]))).toBe(0);
+    expect(await applyToAllStations(makeApi([]))).toBe(0);
   });
 
-  it('skips already-processed stations unless forced', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('skips already-processed stations unless forced', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(1);
-    expect(applyToAllStations(api)).toBe(0); // processed -> skipped
-    expect(applyToAllStations(api, true)).toBe(1); // force -> re-applied
+    expect(await applyToAllStations(api)).toBe(1);
+    expect(await applyToAllStations(api)).toBe(0);
+    expect(await applyToAllStations(api, true)).toBe(1);
     expect(setStationName).toHaveBeenCalledTimes(2);
   });
 
-  it('only renames stations that still need it in a mixed batch', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('only renames stations that still need it in a mixed batch', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1' });
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1], updateStationName: vi.fn() } as never);
     const api = makeApi();
-    applyToAllStations(api); // processes s1
+    await applyToAllStations(api);
 
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
-    expect(applyToAllStations(api)).toBe(1); // only s2 is new
+    expect(await applyToAllStations(api)).toBe(1);
     expect(setStationName).toHaveBeenLastCalledWith('s2', 'Greenpoint');
   });
 
-  it('assigns a neighborhood name to at most one station', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('assigns a name to at most one station', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1' });
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
 
-    expect(applyToAllStations(makeApi())).toBe(1); // s1 takes it; s2 keeps its road name
+    expect(await applyToAllStations(makeApi())).toBe(1);
     expect(setStationName).toHaveBeenCalledTimes(1);
     expect(setStationName).toHaveBeenCalledWith('s1', 'Greenpoint');
   });
 
-  it('blocks the same neighborhood name even across different lines', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('blocks the same name even across different lines', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1', routeIds: ['r1'] });
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2', routeIds: ['r2'] });
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
 
-    expect(applyToAllStations(makeApi())).toBe(1); // uniqueness is global, not per line
+    expect(await applyToAllStations(makeApi())).toBe(1);
     expect(setStationName).toHaveBeenCalledTimes(1);
   });
 
-  it('avoids a name already assigned to another station', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('avoids a name already assigned to another station', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1], updateStationName: vi.fn() } as never);
     const api = makeApi();
-    applyToAllStations(api); // s1 -> Greenpoint (processed)
-    s1.name = 'Greenpoint'; // reflect the rename in the store snapshot
+    await applyToAllStations(api);
+    s1.name = 'Greenpoint';
 
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
-    expect(applyToAllStations(api)).toBe(0); // s2 blocked by s1's name
+    expect(await applyToAllStations(api)).toBe(0);
     expect(setStationName).toHaveBeenCalledTimes(1);
   });
 
-  it('reverts a pre-existing duplicate to its road name when forced', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('reverts a pre-existing duplicate to its road name when forced', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1', name: 'Greenpoint' });
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2', name: 'Greenpoint' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
 
-    applyToAllStations(makeApi(), true);
+    await applyToAllStations(makeApi(), true);
     expect(refreshStationName).toHaveBeenCalledTimes(1);
-    expect(refreshStationName).toHaveBeenCalledWith('s2'); // the later station reverts
-    expect(setStationName).not.toHaveBeenCalled(); // s1 already had the name
+    expect(refreshStationName).toHaveBeenCalledWith('s2');
+    expect(setStationName).not.toHaveBeenCalled();
   });
 
-  it('does not revert a conflicting station outside of a force re-apply', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('does not revert a conflicting station outside of a force re-apply', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const s1 = makeStation({ id: 's1' });
     const s2 = makeStation({ id: 's2', trackGroupId: 'g2', name: 'Greenpoint' });
     vi.mocked(getStore).mockReturnValue({ stations: [s1, s2], updateStationName: vi.fn() } as never);
 
-    applyToAllStations(makeApi()); // non-force
+    await applyToAllStations(makeApi());
     expect(refreshStationName).not.toHaveBeenCalled();
   });
 
-  it('renames nothing when the toggle is off', () => {
-    vi.mocked(isEnabled).mockReturnValue(false);
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('renames nothing when the toggle is off', async () => {
+    vi.mocked(getSettings).mockReturnValue({
+      enabled: false,
+      mode: 'neighborhood',
+      disambiguation: 'auto',
+      radiusM: 500,
+      sequentialFormat: 'number',
+    });
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
 
-    expect(applyToAllStations(makeApi())).toBe(0);
+    expect(await applyToAllStations(makeApi())).toBe(0);
     expect(setStationName).not.toHaveBeenCalled();
   });
 
-  it('keeps the road name and stays eligible when no label is nearby', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue(null); // nothing nearby yet
+  it('keeps the road name and stays eligible when no candidates are available', async () => {
+    mockCandidates.mockReturnValueOnce([]).mockReturnValueOnce([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(0);
+    expect(await applyToAllStations(api)).toBe(0);
     expect(setStationName).not.toHaveBeenCalled();
 
-    // A label appears later (tiles loaded); the station was not marked processed.
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
-    expect(applyToAllStations(api)).toBe(1);
+    expect(await applyToAllStations(api)).toBe(1);
     expect(setStationName).toHaveBeenCalledWith('s1', 'Greenpoint');
   });
 
-  it('marks a station processed without a write when it already has the name', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('marks a station processed without a write when it already has the name', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1', name: 'Greenpoint' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(0); // already correct
+    expect(await applyToAllStations(api)).toBe(0);
     expect(setStationName).not.toHaveBeenCalled();
-    expect(applyToAllStations(api)).toBe(0); // now processed, still nothing
+    expect(await applyToAllStations(api)).toBe(0);
   });
 
-  it('leaves a station eligible when the store is not ready, so it retries', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
-    vi.mocked(setStationName).mockReturnValue(false); // store not ready
+  it('leaves a station eligible when the store is not ready, so it retries', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
+    vi.mocked(setStationName).mockReturnValue(false);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(0); // write failed; not marked processed
+    expect(await applyToAllStations(api)).toBe(0);
 
     vi.mocked(setStationName).mockReturnValue(true);
-    expect(applyToAllStations(api)).toBe(1); // retried and succeeded
+    expect(await applyToAllStations(api)).toBe(1);
   });
 });
 
 describe('resetProcessed', () => {
-  it('lets a previously-processed station be re-evaluated', () => {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+  it('lets a previously-processed station be re-evaluated', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     const api = makeApi();
 
-    expect(applyToAllStations(api)).toBe(1); // renamed, now processed
-    expect(applyToAllStations(api)).toBe(0); // processed -> skipped
+    expect(await applyToAllStations(api)).toBe(1);
+    expect(await applyToAllStations(api)).toBe(0);
 
     resetProcessed();
-    expect(applyToAllStations(api)).toBe(1); // eligible again
+    expect(await applyToAllStations(api)).toBe(1);
+  });
+});
+
+describe('settings changes do not rename existing stations', () => {
+  it('changing mode without force leaves already-named stations untouched', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
+    const stations = [makeStation({ id: 's1' })];
+    vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
+    const api = makeApi();
+
+    expect(await applyToAllStations(api)).toBe(1);
+    expect(setStationName).toHaveBeenCalledWith('s1', 'Greenpoint');
+    vi.mocked(setStationName).mockClear();
+
+    vi.mocked(getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'street',
+      disambiguation: 'auto',
+      radiusM: 800,
+      sequentialFormat: 'number',
+    });
+    mockCandidates.mockReturnValue([makeCandidate('Broadway')]);
+
+    expect(await applyToAllStations(api)).toBe(0);
+    expect(setStationName).not.toHaveBeenCalled();
+  });
+
+  it('force re-apply picks up the new settings for existing stations', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
+    const stations = [makeStation({ id: 's1' })];
+    vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
+    const api = makeApi();
+
+    await applyToAllStations(api);
+    vi.mocked(setStationName).mockClear();
+
+    vi.mocked(getSettings).mockReturnValue({
+      enabled: true,
+      mode: 'street',
+      disambiguation: 'auto',
+      radiusM: 800,
+      sequentialFormat: 'number',
+    });
+    mockCandidates.mockReturnValue([makeCandidate('Broadway')]);
+
+    expect(await applyToAllStations(api, true)).toBe(1);
+    expect(setStationName).toHaveBeenCalledWith('s1', 'Broadway');
   });
 });
 
@@ -234,58 +321,66 @@ describe('scheduleApplyToAllStations', () => {
   });
 
   function setupRenamableStation(): ModdingAPI {
-    vi.mocked(findNeighborhoodName).mockReturnValue('Greenpoint');
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
     const stations = [makeStation({ id: 's1' })];
     vi.mocked(getStore).mockReturnValue({ stations, updateStationName: vi.fn() } as never);
     return makeApi();
   }
 
-  it('does not rename synchronously (the regression the deferral fixes)', () => {
+  it('does not rename synchronously (the regression the deferral fixes)', async () => {
     const api = setupRenamableStation();
-    scheduleApplyToAllStations(api);
+    const promise = scheduleApplyToAllStations(api);
     expect(setStationName).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1);
+    await Promise.resolve();
+    await promise;
     expect(setStationName).toHaveBeenCalledWith('s1', 'Greenpoint');
   });
 
-  it('renames after the configured delay', () => {
+  it('renames after the configured delay', async () => {
     const api = setupRenamableStation();
-    scheduleApplyToAllStations(api, 250);
+    const promise = scheduleApplyToAllStations(api, 250);
 
     vi.advanceTimersByTime(249);
     expect(setStationName).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(1);
+    await Promise.resolve();
+    await promise;
     expect(setStationName).toHaveBeenCalledTimes(1);
   });
 
-  it('debounces rapid successive calls into a single scan', () => {
+  it('debounces rapid successive calls into a single scan', async () => {
     const api = setupRenamableStation();
     scheduleApplyToAllStations(api, 100);
     scheduleApplyToAllStations(api, 100);
-    scheduleApplyToAllStations(api, 100);
+    const promise = scheduleApplyToAllStations(api, 100);
 
     vi.advanceTimersByTime(100);
-    // One scan -> getStore read once, station renamed once.
+    await Promise.resolve();
+    await promise;
     expect(getStore).toHaveBeenCalledTimes(1);
     expect(setStationName).toHaveBeenCalledTimes(1);
   });
 
-  it('swallows errors thrown during the deferred scan', () => {
+  it('swallows errors thrown during the deferred scan', async () => {
     vi.mocked(getStore).mockReturnValue(null);
     const api = {
-      utils: { getMap: () => ({}) },
+      utils: { getMap: () => ({}), getCityCode: () => 'NYC' },
       gameState: {
         getStations: () => {
           throw new Error('game state exploded');
         },
+        getRoutes: () => [],
       },
     } as unknown as ModdingAPI;
     const errorSpy = vi.spyOn(console, 'error');
 
-    scheduleApplyToAllStations(api);
-    expect(() => vi.advanceTimersByTime(1)).not.toThrow();
+    const promise = scheduleApplyToAllStations(api);
+    vi.advanceTimersByTime(1);
+    await Promise.resolve();
+    await promise;
     expect(errorSpy).toHaveBeenCalled();
   });
 });
