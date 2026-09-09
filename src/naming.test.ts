@@ -32,7 +32,12 @@ vi.mock('./store', () => ({
   refreshStationName: vi.fn(() => true),
 }));
 
-import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
+import {
+  applyToAllStations,
+  initializeProcessedStations,
+  resetProcessed,
+  scheduleApplyToAllStations,
+} from './naming';
 import { getSettings } from './settings';
 import { getStore, setStationName, refreshStationName } from './store';
 import type { ModdingAPI } from './types/api';
@@ -260,6 +265,43 @@ describe('resetProcessed', () => {
 
     resetProcessed();
     expect(await applyToAllStations(api)).toBe(1);
+  });
+});
+
+describe('initializeProcessedStations', () => {
+  it('preserves a manually overridden name after a map reload', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
+    const station = makeStation({ id: 's1', name: 'My Custom Name' });
+    vi.mocked(getStore).mockReturnValue({
+      stations: [station],
+      updateStationName: vi.fn(),
+    } as never);
+    const api = makeApi();
+
+    // onMapReady seeds all stations loaded from the save before automatic
+    // placement/construction hooks are allowed to scan the map.
+    initializeProcessedStations(api);
+
+    expect(await applyToAllStations(api)).toBe(0);
+    expect(setStationName).not.toHaveBeenCalled();
+  });
+
+  it('still names stations created after the map-load baseline', async () => {
+    mockCandidates.mockReturnValue([makeCandidate('Greenpoint')]);
+    const existing = makeStation({ id: 's1', name: 'My Custom Name' });
+    const stations = [existing];
+    vi.mocked(getStore).mockReturnValue({
+      stations,
+      updateStationName: vi.fn(),
+    } as never);
+    const api = makeApi();
+
+    initializeProcessedStations(api);
+    stations.push(makeStation({ id: 's2', trackGroupId: 'g2' }));
+
+    expect(await applyToAllStations(api)).toBe(1);
+    expect(setStationName).toHaveBeenCalledOnce();
+    expect(setStationName).toHaveBeenCalledWith('s2', 'Greenpoint');
   });
 });
 

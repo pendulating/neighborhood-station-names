@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('./naming', () => ({
   applyToAllStations: vi.fn(() => Promise.resolve(0)),
+  initializeProcessedStations: vi.fn(),
   resetProcessed: vi.fn(),
   scheduleApplyToAllStations: vi.fn(),
 }));
@@ -106,7 +107,7 @@ describe('main wiring', () => {
 
   it('does not double-register if onMapReady fires again', async () => {
     const mock = makeMockApi();
-    await loadMain(mock.api);
+    const { naming } = await loadMain(mock.api);
 
     fireMapReady(mock.handlers);
     fireMapReady(mock.handlers);
@@ -114,6 +115,7 @@ describe('main wiring', () => {
     expect(mock.toggles).toHaveLength(1);
     expect(mock.buttons).toHaveLength(1);
     expect(mock.handlers.blueprintPlaced).toHaveLength(1);
+    expect(naming.initializeProcessedStations).toHaveBeenCalledTimes(2);
   });
 
   it('routes blueprint placement through the deferred scheduler (the bug fix)', async () => {
@@ -139,7 +141,7 @@ describe('main wiring', () => {
     expect(naming.applyToAllStations).not.toHaveBeenCalled();
   });
 
-  it('toggle change persists the setting and resets processed stations', async () => {
+  it('toggle change persists the setting and protects existing stations', async () => {
     const mock = makeMockApi();
     const { naming, settings } = await loadMain(mock.api);
     fireMapReady(mock.handlers);
@@ -148,7 +150,8 @@ describe('main wiring', () => {
     onChange(false);
 
     expect(settings.updateSettings).toHaveBeenCalledWith({ enabled: false });
-    expect(naming.resetProcessed).toHaveBeenCalledTimes(1);
+    expect(naming.initializeProcessedStations).toHaveBeenCalledTimes(2);
+    expect(naming.resetProcessed).not.toHaveBeenCalled();
     expect(mock.notifications.some((n) => n.type === 'info')).toBe(true);
   });
 
@@ -214,7 +217,7 @@ describe('main wiring', () => {
     expect(mock.notifications.some((n) => n.type === 'info' && /no stations renamed/i.test(n.message))).toBe(true);
   });
 
-  it('mode select change persists the setting and resets processed stations', async () => {
+  it('mode select change persists the setting and protects existing stations', async () => {
     const mock = makeMockApi();
     const { naming, settings } = await loadMain(mock.api);
     fireMapReady(mock.handlers);
@@ -224,7 +227,8 @@ describe('main wiring', () => {
     (modeSelect!.onChange as (v: string) => void)('street');
 
     expect(settings.updateSettings).toHaveBeenCalledWith({ mode: 'street' });
-    expect(naming.resetProcessed).toHaveBeenCalled();
+    expect(naming.initializeProcessedStations).toHaveBeenCalledTimes(2);
+    expect(naming.resetProcessed).not.toHaveBeenCalled();
     expect(mock.notifications.some((n) => n.message.includes('Street'))).toBe(true);
   });
 
