@@ -16,13 +16,32 @@ import type { DisambiguationOptions } from './disambiguation';
 
 const TAG = '[NeighborhoodNames]';
 
-/** Stations we've already renamed, so we never fight a user's manual rename. */
+/**
+ * Stations that already existed when the current map loaded, or that this mod
+ * has considered since then. Keeping them here prevents automatic hook scans
+ * from fighting a user's manual rename.
+ */
 const processed = new Set<string>();
 
 /** All stations, from the live store when available, else the API snapshot. */
 function getAllStations(api: ModdingAPI): Station[] {
   const store = getStore();
   return store?.stations ?? api.gameState.getStations() ?? [];
+}
+
+/**
+ * Treat every station already present on a freshly loaded map as processed.
+ *
+ * Station names are saved by the game, including manual overrides. The
+ * processed set is intentionally session-local, so it must be seeded whenever
+ * a map loads; otherwise the next placement hook would mistake every loaded
+ * station for a new one and overwrite its saved name.
+ */
+export function initializeProcessedStations(api: ModdingAPI): void {
+  processed.clear();
+  for (const station of getAllStations(api)) {
+    processed.add(station.id);
+  }
 }
 
 /**
@@ -156,7 +175,7 @@ export async function applyToAllStations(
   return renamed;
 }
 
-/** Forget all processed stations (e.g. when the toggle flips) so they re-evaluate. */
+/** Forget all processed stations. Exported for isolated state reset in tests. */
 export function resetProcessed(): void {
   processed.clear();
 }

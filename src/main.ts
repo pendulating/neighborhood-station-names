@@ -14,7 +14,11 @@
  */
 
 import { getSettings, updateSettings } from './settings';
-import { applyToAllStations, resetProcessed, scheduleApplyToAllStations } from './naming';
+import {
+  applyToAllStations,
+  initializeProcessedStations,
+  scheduleApplyToAllStations,
+} from './naming';
 import type { NamingMode, DisambiguationStyle } from './types/naming';
 
 // Injected at build time from manifest.json (see vite.config.ts).
@@ -35,10 +39,15 @@ if (!api) {
   let initialized = false;
 
   api.hooks.onMapReady(() => {
-    if (initialized) return;
-    initialized = true;
-
     try {
+      // The game persists station names. Seed the session-local processed set
+      // on every map load so saved/manual names are never mistaken for newly
+      // placed stations by the next automatic hook scan.
+      initializeProcessedStations(api);
+
+      if (initialized) return;
+      initialized = true;
+
       const settings = getSettings();
 
       // =====================================================================
@@ -63,7 +72,9 @@ if (!api) {
         defaultValue: settings.enabled,
         onChange: (value: boolean) => {
           updateSettings({ enabled: value });
-          resetProcessed();
+          // Enabling naming affects future stations only. The explicit
+          // "Rename existing stations" button remains the opt-in bulk action.
+          initializeProcessedStations(api);
           api.ui.showNotification(
             value ? 'Station naming on' : 'Station naming off',
             'info',
@@ -93,7 +104,9 @@ if (!api) {
           defaultValue: getSettings().mode,
           onChange: (value: string) => {
             updateSettings({ mode: value as NamingMode });
-            resetProcessed();
+            // A mode change must not retroactively rewrite existing or
+            // manually edited station names.
+            initializeProcessedStations(api);
             registerModeSelect();
             api.ui.showNotification(
               `Naming mode: ${modeOptions.find((o) => o.value === value)?.label ?? value}`,
